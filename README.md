@@ -1,2 +1,2 @@
-# GenieCart
-Repo for GenieCart an AI agnet designed to help small busniness purchase items needed for everyday use, tracking budget, and documenting purchases quickly.
+Cart
+Repo for GenieCart, an AI agent designed to help small businesses purchase items needed for everyday use, track budgets, and document purchases quickly.
