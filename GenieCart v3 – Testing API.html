@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GenieCart v2</title>
+<style>
+:root{--bg:#f7f7f5;--cd:#fff;--tx:#1d1d1b;--mu:#6b6b66;--bd:#e2e2dc;--ac:#4a3fd1;--ok:#16794a;--no:#b3261e;--wn:#9a6700;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--cd:#212120;--tx:#eeeee9;--mu:#a3a39b;--bd:#37372f;--ac:#9d95ff;--ok:#4cc38a;--no:#ff8a80;--wn:#e3b341}}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:940px;margin:0 auto;padding:16px}h1{font-size:22px;margin:4px 0}h2{font-size:16px;margin:0 0 8px}
+.mu{color:var(--mu);font-size:13px}.c{background:var(--cd);border:1px solid var(--bd);border-radius:10px;padding:14px;margin:12px 0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.row label{display:flex;flex-direction:column;font-size:12px;color:var(--mu);gap:2px}
+input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--tx)}
+button{cursor:pointer}button.p{background:var(--ac);color:#fff;border-color:var(--ac)}button.ok{border-color:var(--ok);color:var(--ok)}button.no{border-color:var(--no);color:var(--no)}
+.badge{font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;border:1px solid currentColor}.PENDING{color:var(--wn)}.APPROVED{color:var(--ok)}.REJECTED{color:var(--no)}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;padding:5px 6px;border-bottom:1px solid var(--bd);vertical-align:top}th{color:var(--mu);font-weight:500}
+.w{overflow-x:auto}.err{color:var(--no);margin:8px 0;min-height:1em}.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.g>div{border:1px solid var(--bd);border-radius:8px;padding:8px;font-size:13px}
+.rec{border:2px solid var(--ac);border-radius:10px;margin:18px 0;background:var(--cd);overflow:hidden}.rh{padding:12px 14px;background:color-mix(in srgb,var(--ac) 12%,transparent)}.sec{padding:10px 14px;border-top:1px solid var(--bd)}
+.win{color:var(--ok);font-weight:700}.sv{color:var(--ok);font-size:18px}.warn{color:var(--wn);font-size:13px}summary{cursor:pointer;font-weight:600;font-size:13px}.bar{height:6px;background:var(--bd);border-radius:4px;margin-top:4px}.bar i{display:block;height:6px;background:var(--ac);border-radius:4px}
+</style></head><body><main>
+<h1>🛒 GenieCart <span class="mu">v3 · Testing API</span></h1>
+<p class="mu">GenieCart recommends. A human decides. Nothing is ever purchased automatically. Sample data only (mock vendors, mock AI). Decisions are saved in this browser.</p>
+
+<section class="c"><h2>1 · Product request</h2><div class="row">
+<label>Product<input id="q" value="wireless mouse" list="dl" size="20"></label>
+<datalist id="dl"><option>wireless mouse<option>monitor<option>copy paper<option>work gloves<option>led bulbs<option>folding chairs</datalist>
+<label>Quantity<input id="n" type="number" value="10" min="1" style="width:80px"></label>
+<label>Request budget ($)<input id="b" type="number" value="300" min="1" style="width:110px"></label>
+<label>Fund / job / property<select id="fund"></select></label>
+<button class="p" data-a="gen">Generate recommendations</button></div><div id="err" class="err"></div></section>
+
+<section class="c"><h2>Reviewer (human)</h2><div class="row"><label>Name<input id="who" value="Jordan Lee"></label>
+<label>Role<select id="role"><option>Department Manager<option>Purchasing Manager<option>Finance Manager<option>Small Business Owner<option>Compliance Manager</select></label></div>
+<p class="mu">Approval tiers: up to $250 Department Manager · up to $1,000 Purchasing Manager · up to $5,000 Finance Manager · above that the Owner. Compliance Manager has oversight only. Blocked vendor: SketchyDeals.</p></section>
+
+<section class="c"><h2>Fund balances</h2><div id="funds" class="g"></div></section>
+<div id="recs"></div>
+
+<section class="c"><h2>Procurement memory</h2>
+<div class="row"><label>Search past decisions<input id="mq" placeholder="vendor, product, approver, reason" size="30"></label>
+<button data-a="msearch">Search</button><button data-a="csv">Export evidence CSV</button></div>
+<div id="mem" style="margin-top:8px"></div></section>
+
+<section class="c"><h2>Governance (M2 ADRs)</h2><div id="gov" class="g"></div>
+<div class="row" style="margin-top:10px"><button data-a="aiself">Simulate AI approving its own recommendation</button><button data-a="reset">Finance review: reset AI usage</button><button class="no" data-a="wipe">Erase all saved data</button></div>
+<details><summary>Audit log</summary><div class="w"><table id="log"></table></div></details></section>
+
+<section class="c"><h2>Testing API</h2><p class="mu">In-page suite: <code>GenieCartTesting.run()</code> in the console, or the button. Business-rule tests use fake AI gateways only; none can call a live model.</p>
+<div class="row"><button class="p" data-a="runtests">Run tests</button></div><div id="tests" class="w" style="margin-top:8px"></div></section>
+
+<script>
+/* ============ 1. DOMAIN (Smart side, no dependencies) ============ */
+const usd=n=>"$"+Number(n).toFixed(2), low=s=>String(s).toLowerCase();
+class Product{constructor(o){Object.assign(this,o);if(!(this.price>0)||!(this.rating>0))throw new Error("Product needs exact price and quality indicators")}}
+class PurchaseRequest{constructor(query,qty,budget,fund){if(!query||!(qty>0)||!(budget>0))throw new Error("Enter a product, a quantity and a budget above zero.");Object.assign(this,{query,qty,budget,fund})}}
+const Rules={
+  withinBudget:(p,r)=>p.price*r.qty<=r.budget+1e-9,
+  notMoreExpensive:(p,b)=>p.price<=b.price,
+  equalOrBetterQuality:(p,b)=>p.rating>=b.rating&&p.specScore>=b.specScore,
+  hasEvidence:e=>!!(e&&e.sources&&e.sources.length&&e.rationale)};
+const Policy={ /* Feature #2: approval tiers + vendor restrictions */
+  blockedVendors:["SketchyDeals"],
+  rank:r=>({"Department Manager":1,"Purchasing Manager":2,"Finance Manager":3,"Small Business Owner":4})[r]||0,
+  requiredRole:t=>t<=250?"Department Manager":t<=1000?"Purchasing Manager":t<=5000?"Finance Manager":"Small Business Owner",
+  blocked(v){return this.blockedVendors.some(x=>low(x)===low(v))}};
+const total=r=>r.product.price*r.request.qty;
+const Guardrails={ /* pure checks on AI output; no model calls */
+  check(o,facts){const t=low((o&&o.rationale)||""),f=[];
+    if(!o||typeof o.rationale!=="string"||!o.rationale.trim())f.push("empty rationale");
+    if(!(o&&typeof o.confidence==="number"&&o.confidence>=0&&o.confidence<=1))f.push("confidence outside 0-1");
+    if(/\b(approved|purchase (completed|placed)|order placed|i (have )?(bought|purchased))\b/.test(t))f.push("claims authority it does not have");
+    (t.match(/\$\d+(\.\d+)?/g)||[]).forEach(m=>{if(!facts.prices.some(x=>Math.abs(x-parseFloat(m.slice(1)))<0.005))f.push("ungrounded price "+m)});return f},
+  fallback:(b,p)=>p.name+" ("+p.vendor+"): "+usd(p.price)+" vs "+usd(b.price)+" per unit, rating "+p.rating+" vs "+b.rating+", spec score "+p.specScore+" vs "+b.specScore+". Rules-only evidence; AI explanation withheld, manual review required."};
+
+/* ============ 2. USE CASES (depend only on ports) ============ */
+/* Ports: search.search(q) · ai.explain(req,base,p) · repo.save/find/all/nextId/nextBatch · audit.record/all/count */
+class FundBook{ /* Feature #3: balance derived from approved decisions */
+  constructor(funds,repo){this.funds=funds;this.repo=repo}
+  find(n){return this.funds.find(f=>f.name===n)}
+  committed(n){return this.repo.all().filter(r=>r.status==="APPROVED"&&r.request.fund===n).reduce((s,r)=>s+total(r),0)}
+  remaining(n){const f=this.find(n);return f?f.budget-this.committed(n):0}}
+class GenerateRecommendations{
+  constructor(search,ai,repo,audit,funds){Object.assign(this,{search,ai,repo,audit,funds})}
+  async execute(req){
+    if(!this.funds.find(req.fund))throw new Error("Choose a valid fund.");
+    const found=await this.search.search(req.query),base=found.find(p=>p.current);
+    if(!base)throw new Error("No current product found for “"+req.query+"”. Try: wireless mouse, monitor, copy paper, work gloves, led bulbs, folding chairs.");
+    const left=this.funds.remaining(req.fund),ok=[],excluded=[];
+    for(const p of found.filter(x=>!x.current)){
+      const why=[!Rules.withinBudget(p,req)&&"over request budget",p.price*req.qty>left+1e-9&&"exceeds fund balance ("+usd(left)+" left)",
+        !Rules.notMoreExpensive(p,base)&&"costs more than current",!Rules.equalOrBetterQuality(p,base)&&"lower quality than current",
+        Policy.blocked(p.vendor)&&"vendor blocked by policy"].filter(Boolean);
+      why.length?excluded.push(p.name+" ("+why.join(", ")+")"):ok.push(p)}
+    if(!ok.length)throw new Error("No alternative met all rules (budget, fund balance, cost, quality, vendor policy).");
+    ok.sort((a,b)=>a.price-b.price||b.rating-a.rating);
+    const prior=this.repo.all(),batch=this.repo.nextBatch();
+    for(const p of ok.slice(0,3)){
+      let ai,off=null;const s=base.price-p.price;
+      try{ai=await this.ai.explain(req,base,p);const bad=Guardrails.check(ai,{prices:[p.price,base.price,s,s*req.qty,p.price*req.qty,base.price*req.qty]});
+        if(bad.length){off="guardrail: "+bad.join("; ");this.audit.record("GUARDRAIL_FAIL",p.name+": "+bad.join("; "))}}catch(e){off="AI unavailable: "+e.message}
+      if(off){this.audit.record("OFF_RAMP",p.name+": rules-only evidence, manual review ("+off+")");ai={rationale:Guardrails.fallback(base,p),confidence:0}}
+      const memoryNotes=prior.filter(o=>o.product.name===p.name&&o.status!=="PENDING").map(o=>(o.status==="APPROVED"?"Approved before":"Rejected before")+" on "+o.decision.at+" by "+o.decision.by+(o.decision.note?": "+o.decision.note:""));
+      const r={id:this.repo.nextId(),batch,request:req,baseline:base,product:p,excluded,memoryNotes,offRamp:off,status:"PENDING",decision:null,
+        requiredRole:Policy.requiredRole(p.price*req.qty),
+        evidence:{sources:[p.vendor+" (mock://"+low(p.vendor)+"/"+p.id+")",base.vendor+" (mock://"+low(base.vendor)+"/"+base.id+")"],rationale:ai.rationale,confidence:ai.confidence,perUnit:s,total:s*req.qty}};
+      if(!Rules.hasEvidence(r.evidence))throw new Error("ADR-1: recommendation rejected, supporting evidence missing");
+      this.repo.save(r)}
+    this.audit.record("RECOMMENDATIONS_GENERATED",Math.min(3,ok.length)+" for “"+req.query+"”, "+excluded.length+" excluded by rules")}}
+class DecideRecommendation{ /* ADR-3 HITL gate + ADR-4 least privilege + policy engine */
+  constructor(repo,audit,funds){Object.assign(this,{repo,audit,funds})}
+  execute(id,who,status,note){
+    if(!who||who.kind!=="human"||!who.name){this.audit.record("UNAUTHORIZED_ATTEMPT",(who&&who.name||"unknown")+" tried to "+status+" "+id);throw new Error("ADR-3/4 blocked: only an identified human can approve or reject.")}
+    if(status==="REJECTED"&&!note)throw new Error("A rejection needs a reason (decisions must be auditable).");
+    const r=this.repo.find(id);if(!r||r.status!=="PENDING")throw new Error("Recommendation is not pending.");
+    if(status==="APPROVED"){
+      if(!Policy.rank(who.role)){this.audit.record("POLICY_BLOCK",who.name+" ("+who.role+") cannot approve "+id);throw new Error(who.role+" has oversight only and cannot approve purchases.")}
+      if(Policy.rank(who.role)<Policy.rank(r.requiredRole)){this.audit.record("POLICY_BLOCK",who.name+" ("+who.role+") below required "+r.requiredRole+" for "+id);throw new Error("Policy: "+usd(total(r))+" needs approval by "+r.requiredRole+" or higher.")}
+      if(total(r)>this.funds.remaining(r.request.fund)+1e-9){this.audit.record("POLICY_BLOCK",id+" exceeds fund balance of "+r.request.fund);throw new Error("Fund “"+r.request.fund+"” has only "+usd(this.funds.remaining(r.request.fund))+" left.")}}
+    r.status=status;r.decision={by:who.name,role:who.role,at:new Date().toLocaleString(),note:note||""};
+    this.repo.save(r);this.audit.record(status,id+" by "+who.name+" ("+who.role+")")}}
+class QueryMemory{ /* Features #1, #4, #5 read model */
+  constructor(repo){this.repo=repo}
+  execute(q){
+    const needle=low(q||""),by={},m={matches:[],vendors:[],approved:0,rejected:0,pending:0,saved:0,committed:0};
+    for(const r of this.repo.all().slice().reverse()){
+      if(r.status==="PENDING"){m.pending++;continue}
+      const v=by[r.product.vendor]||(by[r.product.vendor]={vendor:r.product.vendor,approved:0,rejected:0,spent:0,saved:0});
+      if(r.status==="APPROVED"){m.approved++;v.approved++;v.spent+=total(r);v.saved+=r.evidence.total;m.saved+=r.evidence.total;m.committed+=total(r)}else{m.rejected++;v.rejected++}
+      const hay=low([r.product.name,r.product.vendor,r.request.query,r.decision.note,r.request.fund,r.decision.by].join(" "));
+      if(!needle||hay.includes(needle))m.matches.push(r)}
+    m.vendors=Object.values(by);return m}}
+
+/* ============ 3. INTERFACE ADAPTERS ============ */
+class RecommendationController{
+  constructor(uc,done){this.uc=uc;this.done=done}
+  async submit(f){let err="";try{await this.uc.execute(new PurchaseRequest(low(f.query.trim()),+f.qty,+f.budget,f.fund))}catch(e){err=e.message}this.done(err)}}
+class ApprovalController{
+  constructor(uc,done){this.uc=uc;this.done=done}
+  decide(id,kind,who,note){let err="";try{this.uc.execute(id,who,kind==="approve"?"APPROVED":"REJECTED",note)}catch(e){err=e.message}this.done(err)}}
+const csvCell=s=>{s=String(s==null?"":s);if(/^[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'};
+const evidenceCsv=recs=>["id,decided_at,status,approver,approver_role,fund,request,qty,product,vendor,unit_price,total,baseline_product,baseline_unit_price,projected_savings,note,evidence"].concat(
+  recs.filter(r=>r.status!=="PENDING").map(r=>[r.id,r.decision.at,r.status,r.decision.by,r.decision.role,r.request.fund,r.request.query,r.request.qty,r.product.name,r.product.vendor,r.product.price.toFixed(2),total(r).toFixed(2),r.baseline.name,r.baseline.price.toFixed(2),r.evidence.total.toFixed(2),r.decision.note,r.evidence.rationale].map(csvCell).join(","))).join("\n");
+
+/* ============ 4. FRAMEWORKS & DRIVERS (Humble side) ============ */
+const P=(id,category,vendor,name,price,rating,reviews,specScore,specs,current)=>new Product({id,category,vendor,name,price,rating,reviews,specScore,specs,current:!!current});
+class MockProductSearchGateway{ /* ADR-002: fixtures behind a port; a live search adapter replaces this */
+  constructor(){this.db=[
+    P("m1","mouse","OfficeHub","Ergo Wireless Mouse EW-30",34.99,4.3,2100,7,{Connectivity:"2.4GHz USB",Battery:"12 mo",DPI:1600},1),
+    P("m2","mouse","TechDirect","QuietClick Wireless Mouse",24.99,4.5,3400,8,{Connectivity:"2.4GHz + Bluetooth",Battery:"18 mo",DPI:2400}),
+    P("m3","mouse","ShopMart","ProTrack Ergonomic Mouse",29.99,4.4,1250,8,{Connectivity:"2.4GHz USB",Battery:"15 mo",DPI:2000}),
+    P("m4","mouse","BulkSupply","BasicGlide Wireless Mouse",12.99,3.8,900,5,{Connectivity:"2.4GHz USB",Battery:"6 mo",DPI:1000}),
+    P("m5","mouse","SketchyDeals","MegaMouse Pro",9.99,4.6,300,8,{Connectivity:"2.4GHz USB",Battery:"20 mo",DPI:3000}),
+    P("d1","monitor","OfficeHub","ViewMax 24 FHD",149.99,4.4,1800,7,{Panel:"VA 1080p",Refresh:"60Hz",Ports:"HDMI, VGA"},1),
+    P("d2","monitor","TechDirect","ClearView 24 IPS",129.99,4.5,2200,8,{Panel:"IPS 1080p",Refresh:"75Hz",Ports:"HDMI, DP"}),
+    P("d3","monitor","ShopMart","PixelPro 27 QHD",189.99,4.6,950,9,{Panel:"IPS 1440p",Refresh:"75Hz",Ports:"HDMI, DP, USB-C"}),
+    P("d4","monitor","BulkSupply","ValueView 22",89.99,4.0,600,5,{Panel:"TN 1080p",Refresh:"60Hz",Ports:"VGA"}),
+    P("p1","paper","OfficeHub","Copy Paper 10-ream case",54.99,4.4,3100,7,{Weight:"20 lb",Brightness:92,Sheets:5000},1),
+    P("p2","paper","BulkSupply","EcoWhite 10-ream case",44.99,4.5,1900,7,{Weight:"20 lb",Brightness:92,Sheets:5000}),
+    P("p3","paper","ShopMart","BrightPrint 10-ream case",49.99,4.7,2600,8,{Weight:"22 lb",Brightness:96,Sheets:5000}),
+    P("p4","paper","TechDirect","Budget Paper 10-ream case",32.99,3.7,400,5,{Weight:"18 lb",Brightness:84,Sheets:5000}),
+    P("g1","gloves","SiteSupply","Leather Work Gloves LG-10",14.99,4.2,1500,6,{Material:"Cowhide","Cut level":"A2",Sizes:"S-XL"},1),
+    P("g2","gloves","BulkSupply","FlexGrip Work Gloves",11.49,4.4,2800,7,{Material:"Cowhide","Cut level":"A3",Sizes:"S-XXL"}),
+    P("g3","gloves","ShopMart","ProLine Leather Gloves",12.99,4.3,900,7,{Material:"Goatskin","Cut level":"A2",Sizes:"S-XL"}),
+    P("g4","gloves","TechDirect","ThinFit Gloves",7.99,3.6,400,4,{Material:"Synthetic","Cut level":"A1",Sizes:"M-L"}),
+    P("b1","bulbs","OfficeHub","LED Bulb 60W-equiv 12-pack",29.99,4.5,5200,7,{Lumens:800,Life:"15000 h",Color:"2700K"},1),
+    P("b2","bulbs","BulkSupply","BrightLife LED 12-pack",24.99,4.6,3800,8,{Lumens:850,Life:"20000 h",Color:"2700K"}),
+    P("b3","bulbs","ShopMart","EcoGlow LED 12-pack",26.49,4.5,2100,7,{Lumens:800,Life:"15000 h",Color:"2700K"}),
+    P("b4","bulbs","TechDirect","DimLite LED 12-pack",17.99,3.9,700,5,{Lumens:600,Life:"8000 h",Color:"3000K"}),
+    P("c1","chairs","OfficeHub","Folding Chair 4-pack",119.99,4.3,1600,7,{Frame:"Steel",Load:"300 lb",Seat:"Vinyl"},1),
+    P("c2","chairs","BulkSupply","StackRight Folding 4-pack",99.99,4.4,1100,7,{Frame:"Steel",Load:"300 lb",Seat:"Vinyl"}),
+    P("c3","chairs","ShopMart","ComfortFold 4-pack",109.99,4.5,900,8,{Frame:"Steel",Load:"350 lb",Seat:"Padded"}),
+    P("c4","chairs","TechDirect","BasicFold 4-pack",69.99,3.7,500,5,{Frame:"Steel",Load:"250 lb",Seat:"Plastic"})];
+    this.tags={mouse:["mouse"],monitor:["monitor","screen"],paper:["paper"],gloves:["glove"],bulbs:["bulb","led"],chairs:["chair"]}}
+  async search(q){const c=Object.keys(this.tags).find(k=>this.tags[k].some(t=>q.includes(t)));return this.db.filter(p=>p.category===c).map(p=>new Product(p))}}
+class MockAIModelGateway{ /* deterministic stand-in for a future Claude API adapter */
+  get isLive(){return false}
+  async explain(req,b,p){const s=(b.price-p.price)*req.qty;
+    return{rationale:p.name+" ("+p.vendor+") is rated "+p.rating+"/5 vs "+b.rating+"/5 for the current item and costs "+usd(p.price)+" vs "+usd(b.price)+" per unit. For "+req.qty+" units that saves "+usd(s)+" while matching or beating current quality and specifications.",
+      confidence:Math.max(.55,Math.min(.95,.6+p.reviews/10000+(p.rating-b.rating)/5))}}}
+const store={ /* browser persistence; falls back to memory if storage is blocked */
+  mem:{},get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):(this.mem[k]??d)}catch(e){return this.mem[k]??d}},
+  set(k,v){this.mem[k]=v;try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},wipe(){this.mem={};try{localStorage.removeItem("gc2.ledger");localStorage.removeItem("gc2.audit")}catch(e){}}};
+class StoredRecommendationRepository{
+  constructor(){this.recs=store.get("gc2.ledger",[])}
+  save(r){const i=this.recs.findIndex(x=>x.id===r.id);i<0?this.recs.push(structuredClone(r)):this.recs[i]=structuredClone(r);store.set("gc2.ledger",this.recs)}
+  find(id){const r=this.recs.find(x=>x.id===id);return r&&structuredClone(r)}
+  all(){return structuredClone(this.recs)}
+  nextId(){return"R-"+(Math.max(0,...this.recs.map(r=>+r.id.slice(2)))+1)}
+  nextBatch(){return Math.max(0,...this.recs.map(r=>r.batch))+1}}
+class StoredAuditLog{
+  constructor(){this.e=store.get("gc2.audit",[])}
+  record(type,detail){this.e.push({t:new Date().toLocaleTimeString(),type,detail});store.set("gc2.audit",this.e.slice(-300))}
+  all(){return[...this.e]}count(t){return this.e.filter(x=>x.type===t).length}}
+/* Governance decorators, wired only in main() */
+class LeastPrivilegeAIGateway{constructor(inner){this.explain=(...a)=>inner.explain(...a)}} /* ADR-4 */
+class CostMonitoringAIGateway{ /* ADR-5 */
+  constructor(inner,audit,limit=12,unit=0.012){Object.assign(this,{inner,audit,limit,unit,used:0,alerts:0,warned:false})}
+  async explain(...a){if(this.used>=this.limit)throw new Error("ADR-5: AI generation paused, usage limit reached. Finance review required.");
+    this.used++;if(!this.warned&&this.used>=this.limit*.8){this.warned=true;this.alerts++;this.audit.record("COST_ALERT","80% of AI usage limit")}return this.inner.explain(...a)}
+  reset(){this.used=0;this.warned=false;this.audit.record("AI_USAGE_RESET","Finance review")}}
+class LoggingAIGateway{ /* ADR-2 */
+  constructor(inner,audit){Object.assign(this,{inner,audit})}
+  async explain(...a){try{const r=await this.inner.explain(...a);this.audit.record("AI_REQUEST",a[2].name);return r}catch(e){this.audit.record("AI_FAILURE",e.message);throw e}}}
+class LoggingRecommendationRepository{ /* ADR-2 */
+  constructor(inner,audit){Object.assign(this,{inner,audit})}
+  save(r){this.inner.save(r);this.audit.record("REPO_SAVE",r.id+" "+r.status)}
+  find(id){return this.inner.find(id)}all(){return this.inner.all()}nextId(){return this.inner.nextId()}nextBatch(){return this.inner.nextBatch()}}
+
+const FUNDS=[{name:"General Operations",budget:5000},{name:"Restricted: Youth Program",budget:600},{name:"Job #1042 Maple St",budget:3000},{name:"Property: Oak Court Units",budget:1500}];
+function compose(o){ /* wiring factory: real adapters in main(), fakes in the Testing API; ADR-2/4/5 decorators applied here */
+  const audit=o.audit,repo=new LoggingRecommendationRepository(o.repo,audit);
+  const cost=new CostMonitoringAIGateway(new LeastPrivilegeAIGateway(o.ai),audit,o.limit);
+  const ai=new LoggingAIGateway(cost,audit),funds=new FundBook(o.funds,repo);
+  return{audit,repo,cost,funds,generate:new GenerateRecommendations(o.search,ai,repo,audit,funds),decide:new DecideRecommendation(repo,audit,funds),memory:new QueryMemory(repo)}}
+
+/* ============ 6. TESTING API (outer ring, in-page): GenieCartTesting.run() ============ */
+class TripwireAIGateway{constructor(){this.calls=0}get isLive(){return false}async explain(){this.calls++;throw new Error("TRIPWIRE: model called in a business-rule test")}}
+class ScriptedAIGateway{constructor(f){this.f=f;this.calls=0}get isLive(){return false}async explain(...a){this.calls++;return this.f(...a)}}
+class MemoryRepo{constructor(){this.recs=[]}save(r){const i=this.recs.findIndex(x=>x.id===r.id);i<0?this.recs.push(structuredClone(r)):this.recs[i]=structuredClone(r)}find(id){const r=this.recs.find(x=>x.id===id);return r&&structuredClone(r)}all(){return structuredClone(this.recs)}nextId(){return"R-"+(Math.max(0,...this.recs.map(r=>+r.id.slice(2)))+1)}nextBatch(){return Math.max(0,...this.recs.map(r=>r.batch))+1}}
+class MemoryAudit{constructor(){this.e=[]}record(type,detail){this.e.push({t:"",type,detail})}all(){return[...this.e]}count(t){return this.e.filter(x=>x.type===t).length}}
+const GenieCartTesting=(()=>{
+  const T=[],test=(suite,name,tag,f)=>T.push({suite,name,tag,f}),ok=(c,m)=>{if(!c)throw new Error(m||"assertion failed")};
+  const no=async(f,s)=>{try{await f()}catch(e){ok(e.message.includes(s),"wrong error: "+e.message);return}throw new Error("expected error containing: "+s)};
+  const mk=(ai,o={})=>{ok(ai.isLive===false,"live model refused in tests");return compose({ai,search:new MockProductSearchGateway(),repo:new MemoryRepo(),audit:new MemoryAudit(),funds:FUNDS.map(f=>({...f})),...o})};
+  const good=()=>new ScriptedAIGateway((...a)=>new MockAIModelGateway().explain(...a)),bad=r=>new ScriptedAIGateway(()=>r);
+  const rq=(q="wireless mouse",n=10,b=300,f="General Operations")=>new PurchaseRequest(q,n,b,f);
+  const H=(role,name="Tester")=>({kind:"human",name,role}),AI={kind:"ai",name:"GenieCart AI",role:"AI Agent"};
+  const b0=P("b","t","V","Base",10,4,1,5,{},1),c0=P("c","t","V","Cheap",8,4.5,1,6,{});
+  const seed=a=>a.repo.save({id:"R-1",batch:1,request:rq("x",10,500),baseline:b0,product:c0,excluded:[],memoryNotes:[],offRamp:null,status:"PENDING",decision:null,requiredRole:"Department Manager",evidence:{sources:["s"],rationale:"r",confidence:.9,perUnit:2,total:20}});
+  const first=async(a,r)=>{await a.generate.execute(r||rq());return a.repo.all()[0]};
+  test("Business rules","budget, cost and quality rules","Rules",()=>{
+    ok(Rules.withinBudget(c0,{qty:10,budget:80})&&!Rules.withinBudget(c0,{qty:10,budget:79}));
+    ok(Rules.notMoreExpensive(c0,b0)&&!Rules.notMoreExpensive(P("e","t","V","E",11,5,1,9,{}),b0));
+    ok(Rules.equalOrBetterQuality(c0,b0)&&!Rules.equalOrBetterQuality(P("l","t","V","L",8,3.9,1,9,{}),b0));
+    ok(Rules.hasEvidence({sources:["s"],rationale:"r"})&&!Rules.hasEvidence({sources:[],rationale:"r"}))});
+  test("Business rules","approval tiers and blocked vendor","Policy",()=>{
+    ok(Policy.requiredRole(250)==="Department Manager"&&Policy.requiredRole(251)==="Purchasing Manager"&&Policy.requiredRole(1001)==="Finance Manager"&&Policy.requiredRole(5001)==="Small Business Owner");ok(Policy.blocked("sketchydeals"))});
+  test("Business rules","recommendations obey every rule and stay pending","Rules · ADR-1/3",async()=>{
+    const a=mk(good());await a.generate.execute(rq());const rs=a.repo.all();ok(rs.length>=1&&rs.length<=3,"1-3 recommendations");
+    ok(rs.every(r=>r.status==="PENDING"&&Rules.withinBudget(r.product,r.request)&&Rules.notMoreExpensive(r.product,r.baseline)&&Rules.equalOrBetterQuality(r.product,r.baseline)&&Rules.hasEvidence(r.evidence)&&!Policy.blocked(r.product.vendor)))});
+  test("Business rules","over-budget request yields no recommendation","Budget",()=>no(()=>mk(good()).generate.execute(rq("wireless mouse",10,1)),"No alternative met all rules"));
+  test("Business rules","fund balance is enforced and tracked","Fund",async()=>{
+    await no(()=>mk(good()).generate.execute(rq("wireless mouse",100,99999,"Restricted: Youth Program")),"No alternative");
+    const a=mk(good()),r=await first(a);a.decide.execute(r.id,H("Small Business Owner"),"APPROVED","ok");ok(Math.abs(a.funds.remaining("General Operations")-(5000-total(r)))<1e-6)});
+  test("Governance","AI actor cannot approve (ADR-3/4)","HITL",async()=>{
+    const a=mk(good()),id=(await first(a)).id;await no(()=>a.decide.execute(id,AI,"APPROVED"),"ADR-3/4");ok(a.audit.count("UNAUTHORIZED_ATTEMPT")===1&&a.repo.find(id).status==="PENDING")});
+  test("Governance","rejection needs a reason; decision is recorded","Audit",async()=>{
+    const a=mk(good()),id=(await first(a)).id;await no(()=>a.decide.execute(id,H("Purchasing Manager"),"REJECTED",""),"needs a reason");
+    a.decide.execute(id,H("Purchasing Manager","Pat"),"REJECTED","too slow");const r=a.repo.find(id);ok(r.status==="REJECTED"&&r.decision.by==="Pat"&&a.audit.count("REJECTED")===1)});
+  test("Governance","policy blocks oversight roles and under-tier approvers","Policy",async()=>{
+    const a=mk(good()),r=await first(a,rq("monitor",5,5000));ok(r.requiredRole!=="Department Manager","needs a higher tier");
+    await no(()=>a.decide.execute(r.id,H("Compliance Manager"),"APPROVED"),"oversight only");await no(()=>a.decide.execute(r.id,H("Department Manager"),"APPROVED"),"Policy:");ok(a.audit.count("POLICY_BLOCK")===2)});
+  test("Governance","cost limit trips the off-ramp; reset restores AI","ADR-5",async()=>{
+    const a=mk(good(),{limit:1});await a.generate.execute(rq());const rs=a.repo.all();ok(rs.length>=2&&!rs[0].offRamp&&/limit/.test(rs[1].offRamp),"second recommendation should off-ramp");a.cost.reset();ok(a.cost.used===0)});
+  test("No live model","decision path never calls the model; live models refused","Tripwire",async()=>{
+    const t=new TripwireAIGateway(),a=mk(t);seed(a);a.decide.execute("R-1",H("Department Manager"),"APPROVED","ok");a.memory.execute("");
+    ok(t.calls===0&&a.repo.find("R-1").status==="APPROVED");let refused=false;try{mk({isLive:true,explain(){}})}catch(e){refused=true}ok(refused,"live model not refused")});
+  test("Guardrails","pure check flags bad AI output and passes good output","Guardrail",()=>{
+    const f={prices:[8,10,20,80,100,2]};ok(Guardrails.check({rationale:"Saves $20.00 vs $10.00",confidence:.8},f).length===0);
+    ok(Guardrails.check({rationale:"",confidence:2},f).length>=2);ok(Guardrails.check({rationale:"Order placed for $99.00",confidence:.5},f).length>=2)});
+  test("Guardrails","good AI output passes with no off-ramp","Guardrail",async()=>{const a=mk(good());await a.generate.execute(rq());ok(a.repo.all().every(r=>!r.offRamp)&&a.audit.count("GUARDRAIL_FAIL")===0)});
+  test("Guardrails","GUARDRAIL FAILURE fires the off-ramp (human review, rules-only evidence)","Off-ramp · ADR-1/3",async()=>{
+    const a=mk(bad({rationale:"Approved! Purchase completed for $1.00",confidence:2}));await a.generate.execute(rq());const rs=a.repo.all();
+    ok(rs.length>=1&&rs.every(r=>r.offRamp&&r.status==="PENDING"&&/manual review required/.test(r.evidence.rationale)&&!/Purchase completed/.test(r.evidence.rationale)&&Rules.hasEvidence(r.evidence)),"off-ramp state");
+    ok(a.audit.count("GUARDRAIL_FAIL")===rs.length&&a.audit.count("OFF_RAMP")===rs.length,"audit trail");await no(()=>a.decide.execute(rs[0].id,AI,"APPROVED"),"ADR-3/4")});
+  test("Guardrails","AI failure also takes the off-ramp","Off-ramp · ADR-2",async()=>{
+    const a=mk(new ScriptedAIGateway(()=>{throw new Error("boom")}));await a.generate.execute(rq());ok(a.repo.all().every(r=>/AI unavailable/.test(r.offRamp))&&a.audit.count("AI_FAILURE")>=1&&a.audit.count("OFF_RAMP")>=1)});
+  async function run(){const out=[];for(const t of T){try{await t.f();out.push({suite:t.suite,test:t.name,tag:t.tag,pass:true})}catch(e){out.push({suite:t.suite,test:t.name,tag:t.tag,pass:false,message:e.message})}}return out}
+  return{run,list:()=>T.map(t=>t.suite+" · "+t.name)}})();
+window.GenieCartTesting=GenieCartTesting;
+
+/* Web UI (view) */
+const $=s=>document.querySelector(s),E=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const row=(l,a,b,w)=>`<tr><th>${E(l)}</th><td>${E(a)}</td><td class="${w?"win":""}">${E(b)}${w?" ✅":""}</td></tr>`;
+const view={
+  card(r,i){const p=r.product,b=r.baseline,d=r.decision,pct=Math.round(r.evidence.perUnit/b.price*100);
+    const act=d?`<div class="sec">${r.status} by <b>${E(d.by)}</b> (${E(d.role)}) on ${E(d.at)}${d.note?" — “"+E(d.note)+"”":""}. No purchase executed (automated purchasing is deferred).</div>`
+      :`<div class="sec"><div class="row"><input id="note-${r.id}" placeholder="Note (required to reject)" size="26"><button class="ok" data-a="approve" data-id="${r.id}">Approve</button><button class="no" data-a="reject" data-id="${r.id}">Reject</button></div></div>`;
+    return `<section class="rec"><div class="rh"><div class="mu"><b>Alternative #${i+1}${i?"":" (Best match)"}</b> · ${r.id}</div>
+    <div><span class="mu">Current</span> <b>${E(b.name)}</b> → <span class="mu">Recommended</span> <b>${E(p.name)}</b></div>
+    <div style="margin-top:6px">Total savings <b class="sv">${usd(r.evidence.total)}</b> (${pct}%) · Total ${usd(total(r))} from <b>${E(r.request.fund)}</b> · <span class="badge ${r.status}">${r.status}</span></div>
+    <div class="mu">Needs approval by ${E(r.requiredRole)} or higher · AI confidence ${Math.round(r.evidence.confidence*100)}%<div class="bar"><i style="width:${Math.round(r.evidence.confidence*100)}%"></i></div></div></div>
+    ${r.memoryNotes.length?`<div class="sec warn">🧠 Organizational memory: ${r.memoryNotes.map(E).join(" | ")}</div>`:""}
+    ${r.offRamp?`<div class="sec warn">⚠️ Off-ramp: AI explanation withheld (${E(r.offRamp)}). Rules-only evidence shown; manual human review required.</div>`:""}
+    <div class="sec w"><table><tr><th></th><th>Current</th><th>Recommended</th></tr>${row("Vendor",b.vendor,p.vendor)}${row("Price / unit",usd(b.price),usd(p.price),p.price<b.price)}${row("Rating",b.rating+" / 5",p.rating+" / 5 ("+p.reviews+" reviews)",p.rating>b.rating)}${row("Spec score",b.specScore,p.specScore,p.specScore>b.specScore)}
+    ${Object.keys(p.specs).map(k=>row(k,b.specs[k],p.specs[k])).join("")}</table></div>
+    <details class="sec" open><summary>Why this recommendation</summary><p>${E(r.evidence.rationale)}</p><p class="mu"><b>Sources:</b> ${r.evidence.sources.map(E).join("; ")}</p><p class="mu"><b>Excluded by rules:</b> ${r.excluded.length?r.excluded.map(E).join("; "):"none"}</p></details>${act}</section>`},
+  mem(m){let h=`<p><b>${m.approved}</b> approved · <b>${m.rejected}</b> rejected · <b>${m.pending}</b> pending · committed <b>${usd(m.committed)}</b> · projected savings <b class="sv" style="font-size:15px">${usd(m.saved)}</b></p>`;
+    if(m.vendors.length)h+=`<div class="w"><table><tr><th>Vendor</th><th>Approved</th><th>Rejected</th><th>Spent</th><th>Saved</th></tr>${m.vendors.map(v=>`<tr><td>${E(v.vendor)}</td><td>${v.approved}</td><td>${v.rejected}</td><td>${usd(v.spent)}</td><td>${usd(v.saved)}</td></tr>`).join("")}</table></div>`;
+    return h+(m.matches.length?`<div class="w"><table><tr><th>When</th><th>Decision</th><th>Product</th><th>Fund</th><th>By</th><th>Why</th></tr>${m.matches.slice(0,50).map(r=>`<tr><td>${E(r.decision.at)}</td><td><span class="badge ${r.status}">${r.status}</span></td><td>${E(r.product.name)} (${E(r.product.vendor)}) × ${r.request.qty}</td><td>${E(r.request.fund)}</td><td>${E(r.decision.by)}</td><td>${E(r.decision.note)}</td></tr>`).join("")}</table></div>`:'<p class="mu">No decided requests match yet.</p>')},
+  render(d){$("#err").textContent=d.err||"";const cur=$("#fund").value;
+    $("#fund").innerHTML=d.funds.map(f=>`<option ${f.name===cur?"selected":""}>${E(f.name)}</option>`).join("");
+    $("#funds").innerHTML=d.funds.map(f=>`<div><b>${E(f.name)}</b><br>${usd(f.remaining)} left of ${usd(f.budget)}<div class="bar"><i style="width:${Math.min(100,f.committed/f.budget*100)}%"></i></div></div>`).join("");
+    $("#recs").innerHTML=d.recs.length?"<h2>2 · Alternatives compared against the current product</h2>"+d.recs.map((r,i)=>view.card(r,i)).join(""):"";
+    $("#mem").innerHTML=view.mem(d.mem);
+    $("#gov").innerHTML=d.gov.map(g=>`<div><b>${E(g[0])}</b><br>${E(g[1])}</div>`).join("");
+    $("#log").innerHTML="<tr><th>Time</th><th>Event</th><th>Detail</th></tr>"+d.log.slice().reverse().slice(0,80).map(e=>`<tr><td>${E(e.t)}</td><td>${E(e.type)}</td><td>${E(e.detail)}</td></tr>`).join("")}};
+
+/* ============ 5. COMPOSITION ROOT: the only place concrete classes meet ============ */
+(function main(){
+  const app=compose({ai:new MockAIModelGateway(),search:new MockProductSearchGateway(),repo:new StoredRecommendationRepository(),audit:new StoredAuditLog(),funds:FUNDS.map(f=>({...f}))});
+  const {audit,repo,cost,funds,decide,memory}=app;
+  const governance=all=>{const dec=all.filter(r=>r.decision),est=cost.used*cost.unit;return[
+    ["ADR-1 Transparency",all.filter(r=>Rules.hasEvidence(r.evidence)).length+"/"+all.length+" recommendations carry evidence"],
+    ["ADR-2 Observability",audit.all().length+" audit events · "+audit.count("AI_FAILURE")+" AI failures"],
+    ["ADR-3 HITL gate",dec.length+" human decisions with approver identity · 0 purchases executed"],
+    ["ADR-4 Least privilege","AI tools: explain() only · "+audit.count("UNAUTHORIZED_ATTEMPT")+" unauthorized attempts blocked"],
+    ["ADR-5 Cost control",cost.used+"/"+cost.limit+" AI requests · est. "+usd(est)+" · "+cost.alerts+" alerts"],
+    ["Policy engine",audit.count("POLICY_BLOCK")+" approvals blocked · "+Policy.blockedVendors.length+" vendor blocked"]]};
+  function refresh(err){const all=repo.all(),latest=Math.max(0,...all.map(r=>r.batch));
+    view.render({err,funds:funds.funds.map(f=>({...f,committed:funds.committed(f.name),remaining:funds.remaining(f.name)})),recs:all.filter(r=>r.batch===latest),
+      mem:memory.execute($("#mq").value),gov:governance(all),log:audit.all()})}
+  const recCtl=new RecommendationController(app.generate,refresh);
+  const apprCtl=new ApprovalController(decide,refresh);
+  const human=()=>({kind:"human",name:$("#who").value.trim(),role:$("#role").value});
+  document.addEventListener("click",async e=>{
+    const el=e.target.closest("[data-a]");if(!el)return;const a=el.dataset.a,id=el.dataset.id;
+    if(a==="gen")await recCtl.submit({query:$("#q").value,qty:$("#n").value,budget:$("#b").value,fund:$("#fund").value});
+    else if(a==="approve"||a==="reject"){const n=$("#note-"+id);apprCtl.decide(id,a,human(),n&&n.value.trim())}
+    else if(a==="aiself"){const p=repo.all().find(r=>r.status==="PENDING");
+      p?apprCtl.decide(p.id,"approve",{kind:"ai",name:"GenieCart AI",role:"AI Agent"},"self-approval"):refresh("Generate recommendations first, then try the AI self-approval.")}
+    else if(a==="reset"){cost.reset();refresh("")}
+    else if(a==="msearch")refresh("");
+    else if(a==="runtests"){$("#tests").textContent="Running…";const r=await GenieCartTesting.run();
+      $("#tests").innerHTML=`<p><b>${r.filter(x=>x.pass).length}/${r.length}</b> passed</p><table><tr><th>Suite</th><th>Test</th><th>Proves</th><th>Result</th></tr>`+r.map(x=>`<tr><td>${E(x.suite)}</td><td>${E(x.test)}</td><td>${E(x.tag)}</td><td class="${x.pass?"win":"err"}">${x.pass?"✅ pass":"❌ "+E(x.message)}</td></tr>`).join("")+"</table>"}
+    else if(a==="csv"){const u=URL.createObjectURL(new Blob([evidenceCsv(repo.all())],{type:"text/csv"})),l=document.createElement("a");l.href=u;l.download="geniecart-evidence.csv";l.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+    else if(a==="wipe"&&confirm("Erase all saved decisions and the audit log in this browser?")){store.wipe();location.reload()}});
+  refresh("");
+})();
+</script></main></body></html>
